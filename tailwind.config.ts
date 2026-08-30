@@ -1,0 +1,1 @@
+import type{Config}from'tailwindcss';export default{content:['./src/**/*.{js,ts,jsx,tsx,mdx}'],theme:{extend:{colors:{aiku:{bg:'#090b09',card:'#111511',accent:'#89F336',accentHover:'#70d92b',border:'#ffffff14',muted:'#9ca3af',danger:'#ef4444'}}}},plugins:[]}satisfies Config;

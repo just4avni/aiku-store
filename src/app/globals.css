@@ -1,0 +1,1 @@
+@tailwind base;@tailwind components;@tailwind utilities;:root{--aiku:#89F336}html{scroll-behavior:smooth}body{background:#090b09;color:#f5f5f5}::selection{background:#89F33655;color:#fff}.glass{background:#ffffff06;border:1px solid #ffffff12;backdrop-filter:blur(18px)}
