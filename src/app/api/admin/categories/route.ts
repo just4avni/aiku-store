@@ -1,0 +1,4 @@
+import {NextResponse} from 'next/server';import {createAdminClient} from '@/lib/supabase/admin';import {requireAdmin} from '@/lib/server-auth';import {slugify} from '@/lib/utils';
+export const runtime='nodejs';
+export async function GET(){const a=await requireAdmin();if('error'in a)return a.error;const {data,error}=await createAdminClient().from('categories').select('*').order('sort_order');return error?NextResponse.json({error:error.message},{status:500}):NextResponse.json({categories:data||[]})}
+export async function POST(req:Request){const a=await requireAdmin();if('error'in a)return a.error;const b=await req.json();const name=String(b.name||'').trim();if(!name)return NextResponse.json({error:'Name required'},{status:400});const {error}=await createAdminClient().from('categories').insert({name,slug:slugify(name),sort_order:Number(b.sort_order)||0});return error?NextResponse.json({error:error.message},{status:400}):NextResponse.json({ok:true})}

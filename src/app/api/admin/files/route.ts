@@ -1,0 +1,3 @@
+import {NextResponse} from 'next/server';import {createAdminClient} from '@/lib/supabase/admin';import {requireAdmin} from '@/lib/server-auth';
+export const runtime='nodejs';
+export async function GET(){const a=await requireAdmin();if('error'in a)return a.error;const db=createAdminClient();const {data,error}=await db.from('product_files').select('id,product_id,file_name,file_path,file_size,file_type,storage_bucket,is_primary,created_at,product:products(name,slug,direct_download_url)').order('created_at',{ascending:false});return error?NextResponse.json({error:error.message},{status:500}):NextResponse.json({files:data||[]})}
