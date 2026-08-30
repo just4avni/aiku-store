@@ -510,3 +510,49 @@ ON CONFLICT (slug) DO NOTHING;
 
 -- Update product thumbnails to use placeholder (admin should upload real images)
 UPDATE products SET thumbnail_url = '/api/placeholder/400/320' WHERE thumbnail_url IS NULL;
+
+-- ============================================================
+-- DOWNLOAD STORE HARDENING / STORAGE
+-- ============================================================
+INSERT INTO storage.buckets (id, name, public) VALUES ('products', 'products', false) ON CONFLICT (id) DO UPDATE SET public = false;
+INSERT INTO storage.buckets (id, name, public) VALUES ('product-thumbnails', 'product-thumbnails', true) ON CONFLICT (id) DO UPDATE SET public = true;
+DROP POLICY IF EXISTS "Admins can manage product files storage" ON storage.objects;
+CREATE POLICY "Admins can manage product files storage" ON storage.objects FOR ALL TO authenticated USING (bucket_id IN ('products','product-thumbnails') AND EXISTS (SELECT 1 FROM public.admin_roles ar WHERE ar.user_id=auth.uid())) WITH CHECK (bucket_id IN ('products','product-thumbnails') AND EXISTS (SELECT 1 FROM public.admin_roles ar WHERE ar.user_id=auth.uid()));
+DROP POLICY IF EXISTS "Public thumbnails are readable" ON storage.objects;
+CREATE POLICY "Public thumbnails are readable" ON storage.objects FOR SELECT TO public USING (bucket_id='product-thumbnails');
+
+DROP POLICY IF EXISTS "Product files viewable by everyone" ON product_files;
+CREATE POLICY "Product files metadata viewable by everyone" ON product_files FOR SELECT USING (true);
+
+-- Only authenticated users can invoke VVIP redemption, and the RPC must use the
+-- authenticated identity instead of trusting a caller-supplied user id/email.
+CREATE OR REPLACE FUNCTION public.redeem_vvip_key(
+    p_key_hash TEXT,
+    p_email TEXT,
+    p_user_id UUID DEFAULT NULL,
+    p_ip_hash TEXT DEFAULT NULL,
+    p_user_agent TEXT DEFAULT NULL
+)
+RETURNS TABLE (success BOOLEAN, message TEXT, product_id UUID, product_name TEXT, product_slug TEXT)
+AS $$
+DECLARE v_key_record RECORD; v_product_record RECORD; v_uid UUID := auth.uid(); v_email TEXT := lower(coalesce(auth.jwt()->>'email',''));
+BEGIN
+    IF v_uid IS NULL OR lower(coalesce(p_email,'')) <> v_email OR (p_user_id IS NOT NULL AND p_user_id <> v_uid) THEN
+        RETURN QUERY SELECT FALSE,'Authentication mismatch.',NULL::UUID,NULL::TEXT,NULL::TEXT; RETURN;
+    END IF;
+    SELECT * INTO v_key_record FROM vvip_keys WHERE key_hash=p_key_hash FOR UPDATE;
+    IF v_key_record IS NULL THEN RETURN QUERY SELECT FALSE,'Invalid key. Please check and try again.',NULL::UUID,NULL::TEXT,NULL::TEXT; RETURN; END IF;
+    IF v_key_record.status='redeemed' THEN RETURN QUERY SELECT FALSE,'This key has already been redeemed.',NULL::UUID,NULL::TEXT,NULL::TEXT; RETURN; END IF;
+    IF v_key_record.status='revoked' THEN RETURN QUERY SELECT FALSE,'This key has been revoked.',NULL::UUID,NULL::TEXT,NULL::TEXT; RETURN; END IF;
+    IF v_key_record.expires_at IS NOT NULL AND v_key_record.expires_at<NOW() THEN UPDATE vvip_keys SET status='expired' WHERE id=v_key_record.id; RETURN QUERY SELECT FALSE,'This key has expired.',NULL::UUID,NULL::TEXT,NULL::TEXT; RETURN; END IF;
+    SELECT * INTO v_product_record FROM products WHERE id=v_key_record.product_id AND is_active=TRUE AND deleted_at IS NULL;
+    IF v_product_record IS NULL THEN RETURN QUERY SELECT FALSE,'Product not found.',NULL::UUID,NULL::TEXT,NULL::TEXT; RETURN; END IF;
+    UPDATE vvip_keys SET status='redeemed',redeemed_at=NOW(),redeemed_by=v_uid,redeemed_email=v_email,attempt_count=attempt_count+1 WHERE id=v_key_record.id;
+    INSERT INTO entitlements(user_id,email,product_id,access_type,source,metadata) VALUES(v_uid,v_email,v_key_record.product_id,'vvip','vvip',jsonb_build_object('vvip_key_id',v_key_record.id)) ON CONFLICT (user_id,product_id) DO NOTHING;
+    INSERT INTO redemptions(vvip_key_id,user_id,email,product_id,ip_hash,user_agent,success) VALUES(v_key_record.id,v_uid,v_email,v_key_record.product_id,p_ip_hash,p_user_agent,TRUE);
+    INSERT INTO security_logs(event_type,severity,user_id,email,details,ip_hash,user_agent) VALUES('vvip_redeemed','info',v_uid,v_email,jsonb_build_object('product_id',v_key_record.product_id,'key_id',v_key_record.id),p_ip_hash,p_user_agent);
+    RETURN QUERY SELECT TRUE,'Key redeemed successfully!',v_product_record.id,v_product_record.name,v_product_record.slug;
+END; $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path=public;
+
+REVOKE EXECUTE ON FUNCTION public.redeem_vvip_key(TEXT,TEXT,UUID,TEXT,TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.redeem_vvip_key(TEXT,TEXT,UUID,TEXT,TEXT) TO authenticated;

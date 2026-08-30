@@ -1,0 +1,15 @@
+import Link from 'next/link';
+import Image from 'next/image';
+import { Download, Lock, Crown } from 'lucide-react';
+import { createClient } from '@/lib/supabase/server';
+import { ProductCard } from '@/components/ProductCard';
+export const dynamic = 'force-dynamic';
+
+export default async function ProductPage({ params }: { params: { slug: string } }) {
+  const supabase = createClient();
+  const { data: product } = await supabase.from('products').select('*,category:categories(*)').eq('slug', params.slug).eq('is_active', true).is('deleted_at', null).maybeSingle();
+  if (!product) return <main className="min-h-screen bg-aiku-bg p-8 text-white">Product not found.</main>;
+  const { data: related } = await supabase.from('products').select('*,category:categories(*)').eq('is_active', true).is('deleted_at', null).neq('id', product.id).eq('category_id', product.category_id || '00000000-0000-0000-0000-000000000000').limit(3);
+  const access = product.access_type === 'vvip' ? 'VVIP' : product.access_type === 'premium' ? 'Premium' : product.access_type === 'account' ? 'Account' : 'Public';
+  return <main className="min-h-screen bg-aiku-bg px-5 py-10 text-aiku-text"><div className="mx-auto max-w-6xl"><Link href="/store" className="text-aiku-accent">← Store</Link><div className="mt-8 grid gap-8 lg:grid-cols-[1.1fr_.9fr]"><div className="relative aspect-[4/3] overflow-hidden rounded-2xl border border-aiku-border bg-aiku-card">{product.thumbnail_url ? <Image src={product.thumbnail_url} alt={product.name} fill className="object-cover" sizes="(max-width: 1024px) 100vw, 60vw"/> : <div className="flex h-full items-center justify-center text-zinc-600">No thumbnail</div>}</div><div><div className="mb-3 inline-flex items-center gap-2 rounded-full bg-aiku-accent/10 px-3 py-1 text-xs font-semibold text-aiku-accent">{product.access_type==='vvip'?<Crown size={14}/>:product.access_type!=='public'?<Lock size={14}/>:null}{access}</div><h1 className="text-4xl font-black">{product.name}</h1><p className="mt-4 text-zinc-400">{product.description || 'Premium digital asset.'}</p><div className="mt-6 grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl bg-aiku-card p-4"><div className="text-zinc-500">Version</div><div className="mt-1 font-semibold">{product.version}</div></div><div className="rounded-xl bg-aiku-card p-4"><div className="text-zinc-500">Downloads</div><div className="mt-1 font-semibold">{product.download_count.toLocaleString()}</div></div></div><a href={`/api/download/${product.slug}`} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-aiku-accent px-5 py-3 font-bold text-black"><Download size={18}/>Download</a>{product.access_type==='vvip'&&<p className="mt-3 text-center text-xs text-zinc-600">Redeem your one-time key first.</p>}</div></div>{related?.length ? <section className="mt-14"><h2 className="text-2xl font-black">Recommended</h2><div className="mt-5 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">{related.map(p=><ProductCard key={p.id} product={p}/>)}</div></section>:null}</div></main>;
+}
