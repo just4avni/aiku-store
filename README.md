@@ -20,3 +20,7 @@ Aiku Store is a Next.js + Supabase digital download store with Normal, VIP and V
 5. Deploy the repository on Vercel.
 
 Uploads use Supabase signed upload URLs so the browser sends large files directly to Supabase instead of through the Vercel function payload.
+
+## VVIP download audit log
+
+The migration `supabase/vvip-download-logs.sql` adds an admin-only audit table for VVIP access/download events. It records the email, key identifier/used key, IP address, and timestamp. Run this migration after the main schema before enabling the admin VVIP activity view.
